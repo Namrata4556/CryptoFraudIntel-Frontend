@@ -440,85 +440,11 @@ if (
     );
   }
 
-    // ============================================================
-  // CLEAN GRAPH VIEW
+  // ============================================================
+  // CLEAN / FOCUSED TRANSACTION TRACE
   // ============================================================
   // Backend full graph remains untouched.
-  // Frontend shows only the most relevant nodes for readability.
-
-  const MAX_VISIBLE_NODES = 20;
-
-  const mainWalletLower = String(
-    walletAddress || ""
-  ).toLowerCase().trim();
-
-  // Main wallet first
-  const mainWalletNode = graphNodes.find(
-    (node) =>
-      String(node).toLowerCase().trim() ===
-      mainWalletLower
-  );
-
-  // Other wallets
-  const otherGraphNodes = graphNodes.filter(
-    (node) =>
-      String(node).toLowerCase().trim() !==
-      mainWalletLower
-  );
-
-  // Keep main wallet + first important connections
-  const visibleGraphNodes = [
-    ...(mainWalletNode ? [mainWalletNode] : []),
-    ...otherGraphNodes.slice(
-      0,
-      MAX_VISIBLE_NODES -
-        (mainWalletNode ? 1 : 0)
-    ),
-  ];
-  // Backend graph edges ko directly use karo.
-  // Sirf invalid/missing source-target wale edges remove honge.
-  const visibleNodeIds = new Set(
-    visibleGraphNodes.map((node) =>
-      String(node).toLowerCase()
-    )
-  );
-
-  const visibleGraphEdges = graphEdges.filter(
-    (edge) => {
-      const source = String(
-        edge.source || ""
-      )
-        .toLowerCase()
-        .trim();
-
-      const target = String(
-        edge.target || ""
-      )
-        .toLowerCase()
-        .trim();
-
-      return (
-        source &&
-        target &&
-        visibleNodeIds.has(source) &&
-        visibleNodeIds.has(target)
-      );
-    }
-  );
-
-  // ============================================================
-  // GRAPH NODE POSITIONS
-  // ============================================================
-
-  const nodePositions = visibleGraphNodes.map(
-    (node, index) => ({
-      node,
-      ...getNodePosition(
-        index,
-        visibleGraphNodes.length
-      ),
-    })
-  );
+  // Frontend shows the most relevant wallets by hop distance.
 
   const maxHops =
     graphData?.max_hops ??
@@ -526,6 +452,204 @@ if (
     result?.max_hops ??
     result?.maxHops ??
     3;
+
+  const MAX_VISIBLE_NODES = 15;
+  const MAX_VISIBLE_EDGES = 20;
+
+  const mainWalletLower = String(
+    walletAddress || ""
+  ).toLowerCase().trim();
+
+  const normalizedEdges = graphEdges.map((edge) => ({
+    source: String(edge.source || "").trim(),
+    target: String(edge.target || "").trim(),
+  }));
+
+  // ------------------------------------------------------------
+  // Find hop distance from the main wallet
+  // ------------------------------------------------------------
+
+  const distanceMap = new Map();
+
+  distanceMap.set(
+    mainWalletLower,
+    0
+  );
+
+  let currentLevel = [
+    mainWalletLower
+  ];
+
+  for (
+    let hop = 1;
+    hop <= maxHops;
+    hop++
+  ) {
+    const nextLevel = [];
+
+    currentLevel.forEach(
+      (currentNode) => {
+
+        normalizedEdges.forEach(
+          (edge) => {
+
+            const source =
+              edge.source.toLowerCase();
+
+            const target =
+              edge.target.toLowerCase();
+
+            let nextNode = null;
+
+            if (source === currentNode) {
+              nextNode = edge.target;
+            }
+
+            if (target === currentNode) {
+              nextNode = edge.source;
+            }
+
+            if (!nextNode) {
+              return;
+            }
+
+            const key =
+              nextNode.toLowerCase();
+
+            if (!distanceMap.has(key)) {
+
+              distanceMap.set(
+                key,
+                hop
+              );
+
+              nextLevel.push(
+                nextNode
+              );
+
+            }
+
+          }
+        );
+
+      }
+    );
+
+    currentLevel = nextLevel;
+
+    if (
+      distanceMap.size >=
+      MAX_VISIBLE_NODES
+    ) {
+      break;
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Select wallets closest to the main wallet
+  // ------------------------------------------------------------
+
+  const visibleGraphNodes =
+    graphNodes
+      .filter((node) =>
+        distanceMap.has(
+          String(node).toLowerCase()
+        )
+      )
+      .sort((a, b) => {
+
+        const distanceA =
+          distanceMap.get(
+            String(a).toLowerCase()
+          ) ?? 999;
+
+        const distanceB =
+          distanceMap.get(
+            String(b).toLowerCase()
+          ) ?? 999;
+
+        return distanceA - distanceB;
+
+      })
+      .slice(
+        0,
+        MAX_VISIBLE_NODES
+      );
+
+  // ------------------------------------------------------------
+  // Keep only connections between visible wallets
+  // ------------------------------------------------------------
+
+  const visibleNodeIds =
+    new Set(
+      visibleGraphNodes.map(
+        (node) =>
+          String(node).toLowerCase()
+      )
+    );
+
+  const visibleGraphEdges =
+    normalizedEdges
+      .filter((edge) => {
+
+        const source =
+          edge.source.toLowerCase();
+
+        const target =
+          edge.target.toLowerCase();
+
+        return (
+          visibleNodeIds.has(source) &&
+          visibleNodeIds.has(target)
+        );
+
+      })
+      .slice(
+        0,
+        MAX_VISIBLE_EDGES
+      );
+
+  // ------------------------------------------------------------
+  // Position wallets according to hop level
+  // ------------------------------------------------------------
+
+  const nodePositions =
+    visibleGraphNodes.map(
+      (node) => {
+
+        const hop =
+          distanceMap.get(
+            String(node).toLowerCase()
+          ) ?? 0;
+
+        const nodesAtSameHop =
+          visibleGraphNodes.filter(
+            (item) =>
+              (
+                distanceMap.get(
+                  String(item).toLowerCase()
+                ) ?? 0
+              ) === hop
+          );
+
+        const index =
+          nodesAtSameHop.findIndex(
+            (item) =>
+              String(item).toLowerCase() ===
+              String(node).toLowerCase()
+          );
+
+        return {
+          node,
+          ...getLayeredNodePosition(
+            hop,
+            index,
+            nodesAtSameHop.length
+          ),
+        };
+
+      }
+    );
 
   // ============================================================
   // FEATURE COUNT
@@ -1585,6 +1709,7 @@ if (
                     !showTechnical
                   )
                 }
+                aria-expanded={showTechnical}
               >
 
                 <div className="technical-title">
@@ -1604,8 +1729,7 @@ if (
                     </strong>
 
                     <span>
-                      Model information for
-                      technical evaluation
+                      Model information for technical evaluation
                     </span>
 
                   </div>
@@ -1624,6 +1748,7 @@ if (
 
               </button>
 
+
               {showTechnical && (
 
                 <div className="technical-content">
@@ -1631,20 +1756,21 @@ if (
                   <div className="technical-intro">
 
                     <strong>
-                      Fraud detection pipeline
+                      Fraud Detection Pipeline
                     </strong>
 
                     <p>
-                      The backend uses machine-learning
-                      models to analyze wallet activity
-                      and determine the final fraud risk.
+                      Machine-learning models analyze
+                      blockchain wallet activity and
+                      generate the final fraud risk.
                     </p>
 
                   </div>
 
+
                   <div className="technical-grid">
 
-                    {/* RANDOM FOREST */}
+                    {/* MODELS */}
 
                     <div className="technical-card">
 
@@ -1653,108 +1779,57 @@ if (
                         <Brain size={18} />
 
                         <strong>
-                          Random Forest
+                          Models
                         </strong>
 
                       </div>
 
                       <div className="technical-value">
 
-                        {rfPercentage.toFixed(
-                          2
-                        )}
-                        %
+                        Random Forest
+                        <br />
+                        +
+                        <br />
+                        XGBoost
 
                       </div>
 
                       <span>
-                        Fraud Score
+                        Machine-learning models
                       </span>
-
-                      <div className="technical-row">
-
-                        <span>
-                          Prediction
-                        </span>
-
-                        <strong>
-                          {String(
-                            rfLabel
-                          )}
-                        </strong>
-
-                      </div>
-
-                      <div className="technical-row">
-
-                        <span>
-                          Risk Level
-                        </span>
-
-                        <strong>
-                          {rfRisk}
-                        </strong>
-
-                      </div>
 
                     </div>
 
-                    {/* XGBOOST */}
+
+                    {/* FEATURES */}
 
                     <div className="technical-card">
 
                       <div className="technical-card-top">
 
-                        <Brain size={18} />
+                        <Activity size={18} />
 
                         <strong>
-                          XGBoost
+                          Features Analyzed
                         </strong>
 
                       </div>
 
                       <div className="technical-value">
 
-                        {xgbPercentage.toFixed(
-                          2
-                        )}
-                        %
+                        {featureCount}
 
                       </div>
 
                       <span>
-                        Fraud Score
+                        Engineered blockchain activity
+                        features
                       </span>
-
-                      <div className="technical-row">
-
-                        <span>
-                          Prediction
-                        </span>
-
-                        <strong>
-                          {String(
-                            xgbLabel
-                          )}
-                        </strong>
-
-                      </div>
-
-                      <div className="technical-row">
-
-                        <span>
-                          Risk Level
-                        </span>
-
-                        <strong>
-                          {xgbRisk}
-                        </strong>
-
-                      </div>
 
                     </div>
 
-                    {/* COMBINED */}
+
+                    {/* FINAL OUTPUT */}
 
                     <div className="technical-card combined">
 
@@ -1765,23 +1840,21 @@ if (
                         />
 
                         <strong>
-                          Combined Result
+                          Final Output
                         </strong>
 
                       </div>
 
                       <div className="technical-value">
 
-                        {combinedPercentage.toFixed(
-                          2
-                        )}
-                        %
+                        {combinedPercentage.toFixed(2)}%
 
                       </div>
 
                       <span>
-                        Final Fraud Score
+                        Combined fraud probability
                       </span>
+
 
                       <div className="technical-row">
 
@@ -1791,18 +1864,6 @@ if (
 
                         <strong>
                           {combinedRiskLevel}
-                        </strong>
-
-                      </div>
-
-                      <div className="technical-row">
-
-                        <span>
-                          Features
-                        </span>
-
-                        <strong>
-                          {featureCount}
                         </strong>
 
                       </div>
@@ -2675,83 +2736,41 @@ function buildTransactionEdges(
 // GRAPH NODE POSITION
 // ============================================================
 
-function getNodePosition(
+function getLayeredNodePosition(
+  hop,
   index,
   total
 ) {
-  if (total <= 1) {
+  if (hop === 0) {
     return {
       x: 50,
-      y: 50,
+      y: 15,
     };
   }
 
-  // Main wallet stays in the center
-  if (index === 0) {
-    return {
-      x: 50,
-      y: 50,
-    };
+  const minX = 12;
+  const maxX = 88;
+
+  let x = 50;
+
+  if (total === 1) {
+    x = 50;
+  } else {
+    x =
+      minX +
+      (index / (total - 1)) *
+        (maxX - minX);
   }
 
-  const remaining =
-    total - 1;
-
-  // More rows for larger graphs
-  const columns =
-    remaining <= 8
-      ? remaining
-      : remaining <= 20
-      ? 5
-      : 7;
-
-  const row =
-    Math.floor(
-      (index - 1) /
-        columns
+  const y =
+    Math.min(
+      15 + hop * 25,
+      85
     );
-
-  const column =
-    (index - 1) %
-    columns;
-
-  const rows =
-    Math.ceil(
-      remaining /
-        columns
-    );
-
-  const horizontalPadding = 8;
-  const verticalPadding = 8;
-
-  const usableWidth =
-    100 -
-    horizontalPadding * 2;
-
-  const usableHeight =
-    100 -
-    verticalPadding * 2;
-
-  const xStep =
-    columns > 1
-      ? usableWidth /
-        (columns - 1)
-      : 0;
-
-  const yStep =
-    rows > 1
-      ? usableHeight /
-        (rows - 1)
-      : 0;
 
   return {
-    x:
-      horizontalPadding +
-      column * xStep,
-
-    y:
-      verticalPadding +
-      row * yStep,
+    x,
+    y,
   };
 }
 
