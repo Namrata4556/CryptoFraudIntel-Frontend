@@ -888,7 +888,7 @@ if (
                 <div className="score-left">
 
                   <span>
-                    Combined ML Risk Score
+                    Fraud Probability
                   </span>
 
                   <strong>
@@ -1228,7 +1228,7 @@ if (
             </section>
 
             {/* ==================================================
-                WALLET TRANSACTION GRAPH
+                Transaction Trace
             ================================================== */}
 
             <section className="panel">
@@ -1244,12 +1244,12 @@ if (
                       className="title-icon"
                     />
 
-                    Wallet Transaction Graph
+                    Transaction Trace
 
                   </h3>
 
                   <span>
-                    Multi-hop blockchain tracing
+                    Wallet connections across multiple hops
                   </span>
 
                 </div>
